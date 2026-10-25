@@ -1,0 +1,5 @@
+resources:
+  - kafka
+  - order-service
+  - inventory-service
+  - notification-service

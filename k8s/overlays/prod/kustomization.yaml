@@ -1,0 +1,15 @@
+resources:
+  - ../../base
+
+# CI overwrites these with the real ECR registry + commit SHA via:
+#   kustomize edit set image order-service=<registry>/order-service:<sha> ...
+images:
+  - name: order-service
+    newName: order-service
+    newTag: latest
+  - name: inventory-service
+    newName: inventory-service
+    newTag: latest
+  - name: notification-service
+    newName: notification-service
+    newTag: latest
