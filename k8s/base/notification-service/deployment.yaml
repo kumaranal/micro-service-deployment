@@ -5,7 +5,7 @@ metadata:
   labels:
     app: notification-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: notification-service
@@ -24,6 +24,12 @@ spec:
               value: "kafka:9092"
             - name: PORT
               value: "3002"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              memory: "128Mi"
           readinessProbe:
             httpGet:
               path: /healthz

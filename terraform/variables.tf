@@ -17,9 +17,9 @@ variable "cluster_version" {
 }
 
 variable "node_instance_type" {
-  description = "EC2 instance type for the managed node group"
+  description = "EC2 instance type for the managed node group. t3.micro is free-tier eligible (750 combined hrs/month) but only has 1 GiB RAM — the k8s manifests tune Kafka's heap and pod resource requests down to fit."
   type        = string
-  default     = "t3.medium"
+  default     = "t3.micro"
 }
 
 variable "node_desired_size" {

@@ -40,6 +40,15 @@ spec:
               value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
+            # Default JVM heap is 1G, which alone exceeds a t3.micro's whole 1GiB RAM.
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx384m -Xms384m"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "450Mi"
+            limits:
+              memory: "550Mi"
           volumeMounts:
             - name: kafka-data
               mountPath: /var/lib/kafka/data
