@@ -1,3 +1,4 @@
 resources:
+  - storageclass.yaml
   - kafka-statefulset.yaml
   - kafka-service.yaml

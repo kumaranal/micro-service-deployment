@@ -34,31 +34,33 @@ spec:
               value: "PLAINTEXT://kafka:9092"
             - name: KAFKA_CONTROLLER_LISTENER_NAMES
               value: "CONTROLLER"
+            # localhost, not the kafka Service: the Service only routes to Ready pods (and doesn't
+            # expose 9093), but the pod can't be Ready until the broker reaches the controller.
+            # Fine for a single combined broker+controller.
             - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-              value: "1@kafka:9093"
+              value: "1@localhost:9093"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
               value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
-            # Default JVM heap is 1G, which alone exceeds a t3.micro's whole 1GiB RAM.
+            # Default JVM heap is 1G, which alone exceeds a t3.micro's whole 1GiB RAM. A t3.micro
+            # only has ~518Mi allocatable, ~70Mi of which aws-node/kube-proxy/coredns already take.
             - name: KAFKA_HEAP_OPTS
-              value: "-Xmx384m -Xms384m"
+              value: "-Xmx256m -Xms256m"
           resources:
             requests:
               cpu: "200m"
-              memory: "450Mi"
+              memory: "380Mi"
             limits:
-              memory: "550Mi"
+              memory: "440Mi"
           volumeMounts:
             - name: kafka-data
               mountPath: /var/lib/kafka/data
+          # A TCP check rather than kafka-topics.sh: that spins up a second JVM, which takes longer
+          # than the probe timeout and doesn't fit in the memory limit alongside the broker.
           readinessProbe:
-            exec:
-              command:
-                - /opt/kafka/bin/kafka-topics.sh
-                - --bootstrap-server
-                - localhost:9092
-                - --list
+            tcpSocket:
+              port: 9092
             initialDelaySeconds: 10
             periodSeconds: 10
   volumeClaimTemplates:
@@ -66,6 +68,7 @@ spec:
         name: kafka-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3
         resources:
           requests:
             storage: 5Gi

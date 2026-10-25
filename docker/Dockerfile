@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-alpine AS base
+# Install/build run on the builder's native arch: the deps are pure JS, so the output is
+# portable, and running Node under QEMU (e.g. building amd64 on Apple Silicon) crashes.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS base
 RUN corepack enable
 WORKDIR /app
 
@@ -17,8 +19,8 @@ ARG SERVICE
 COPY . .
 RUN pnpm --filter @ms/shared build && pnpm --filter "@ms/${SERVICE}" build
 
+# No RUN steps here, so cross-arch builds never execute anything emulated.
 FROM node:22-alpine AS runtime
-RUN corepack enable
 ARG SERVICE
 ENV NODE_ENV=production
 ENV SERVICE=${SERVICE}
