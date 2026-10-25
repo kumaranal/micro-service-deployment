@@ -23,6 +23,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # @ms/shared's package.json points to dist/, so it must be built before
+      # other packages can resolve it during typecheck (--noEmit never writes dist/).
+      - run: pnpm --filter @ms/shared run build
       - run: pnpm -r run typecheck
 
   build-and-push:
