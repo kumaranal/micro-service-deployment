@@ -1,12 +1,12 @@
 import type { Kafka } from "kafkajs";
-import { Topics, createLogger, type InventoryUpdatedEvent } from "@ms/shared";
+import { Topics, createLogger, retry, type InventoryUpdatedEvent } from "@ms/shared";
 
 const logger = createLogger("notification-service:inventory-updated-consumer");
 
 export async function startInventoryUpdatedConsumer(kafka: Kafka): Promise<void> {
   const consumer = kafka.consumer({ groupId: "notification-service" });
   await consumer.connect();
-  await consumer.subscribe({ topic: Topics.INVENTORY_UPDATED, fromBeginning: false });
+  await retry(() => consumer.subscribe({ topic: Topics.INVENTORY_UPDATED, fromBeginning: false }));
 
   await consumer.run({
     eachMessage: async ({ message }) => {

@@ -3,6 +3,7 @@ import {
   Topics,
   publishEvent,
   createLogger,
+  retry,
   type OrderCreatedEvent,
   type InventoryUpdatedEvent,
 } from "@ms/shared";
@@ -13,7 +14,7 @@ const logger = createLogger("inventory-service:order-created-consumer");
 export async function startOrderCreatedConsumer(kafka: Kafka, producer: Producer): Promise<void> {
   const consumer = kafka.consumer({ groupId: "inventory-service" });
   await consumer.connect();
-  await consumer.subscribe({ topic: Topics.ORDERS_CREATED, fromBeginning: false });
+  await retry(() => consumer.subscribe({ topic: Topics.ORDERS_CREATED, fromBeginning: false }));
 
   await consumer.run({
     eachMessage: async ({ message }) => {
