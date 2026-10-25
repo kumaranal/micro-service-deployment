@@ -3,3 +3,10 @@ dist/
 *.log
 .env
 .DS_Store
+
+# Terraform (the .terraform.lock.hcl file itself IS committed — pins provider versions)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/crash.log

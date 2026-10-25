@@ -15,7 +15,7 @@ Stack: Node 22, TypeScript, pnpm workspaces, Express, kafkajs.
 
 ## Repo layout
 
-See the top-level `packages/`, `k8s/`, `docker/`, `eksctl/`, and `.github/workflows/` directories.
+See the top-level `packages/`, `k8s/`, `docker/`, `terraform/`, and `.github/workflows/` directories.
 `packages/shared` holds the Kafka client wrapper, topic/event types, and logger used by all three services.
 
 ## Local development
@@ -55,90 +55,51 @@ pnpm dev
 
 `pnpm dev` builds `@ms/shared` once, then runs all three services with `tsx watch`.
 
-## One-time AWS setup
+## One-time AWS setup (Terraform)
 
-Everything below is done once per AWS account. None of it is free-tier — see **Cost / teardown**.
+Everything AWS-side — the VPC, the EKS cluster, the 3 ECR repos, the GitHub OIDC provider/role, and that
+role's EKS access — is provisioned by [`terraform/`](terraform/). None of it is free-tier — see
+**Cost / teardown**. No AWS console clicking required; just the AWS CLI configured with credentials that
+can create VPC/EKS/IAM/ECR resources.
 
-### 1. ECR repositories
+### 1. Configure and apply
 
 ```bash
-for svc in order-service inventory-service notification-service; do
-  aws ecr create-repository --repository-name "$svc" --region ap-south-1
-done
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# edit terraform.tfvars: set github_repository to "YOUR_GH_ORG/YOUR_REPO"
+
+terraform init
+terraform plan   # review what it's about to create
+terraform apply
 ```
 
-### 2. EKS cluster
+Takes ~15-20 minutes (mostly the EKS control plane). This creates:
 
-Requires `eksctl` and `kubectl`.
+- A VPC with public + private subnets across 2 AZs and a single NAT gateway
+- The EKS cluster (`var.cluster_name`, default `micro-service`) with a 2-node `t3.medium` managed node group
+- The 3 ECR repositories
+- The GitHub OIDC provider (reused if one already exists in the account) and a role GitHub Actions can
+  assume — no stored AWS access keys
+- An EKS access entry granting that role `AmazonEKSClusterAdminPolicy`, so CI can `kubectl apply` and
+  `rollout status` without any manual `aws eks create-access-entry` step
+
+### 2. Wire up GitHub and kubectl
 
 ```bash
-eksctl create cluster -f eksctl/cluster.yaml
+terraform output github_actions_role_arn
 ```
 
-Takes ~15-20 minutes. This also provisions an OIDC provider for the cluster (`iam.withOIDC: true`),
-which you'll need for pod-level IAM later if you extend this tutorial.
-
-### 3. GitHub Actions OIDC role (no stored AWS keys)
-
-Create the GitHub OIDC identity provider (skip if your account already has one):
+Add that value as a GitHub repo secret named `AWS_OIDC_ROLE_ARN` (Settings → Secrets and variables → Actions).
 
 ```bash
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
-```
-
-Create the role (replace `ACCOUNT_ID`, `GITHUB_ORG/REPO`):
-
-```bash
-cat > trust-policy.json <<'EOF'
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": { "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com" },
-    "Action": "sts:AssumeRoleWithWebIdentity",
-    "Condition": {
-      "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-      "StringLike": { "token.actions.githubusercontent.com:sub": "repo:GITHUB_ORG/REPO:ref:refs/heads/main" }
-    }
-  }]
-}
-EOF
-
-aws iam create-role \
-  --role-name github-actions-micro-service \
-  --assume-role-policy-document file://trust-policy.json
-
-aws iam attach-role-policy \
-  --role-name github-actions-micro-service \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
-```
-
-EKS access for the role is granted separately in cluster-level RBAC (step 4) — the ECR policy above is
-only for push/pull.
-
-Add the role's ARN as a GitHub repo secret named `AWS_OIDC_ROLE_ARN` (Settings → Secrets and variables → Actions).
-
-### 4. Grant the role access to the EKS cluster
-
-```bash
-aws eks create-access-entry \
-  --cluster-name micro-service \
-  --principal-arn arn:aws:iam::ACCOUNT_ID:role/github-actions-micro-service
-
-aws eks associate-access-policy \
-  --cluster-name micro-service \
-  --principal-arn arn:aws:iam::ACCOUNT_ID:role/github-actions-micro-service \
-  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
-  --access-scope type=cluster
+terraform output -raw configure_kubectl | sh    # or just copy/paste the printed command
 ```
 
 Now a push to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml): typecheck → build and
 push three images tagged with the commit SHA → `kubectl apply -k k8s/overlays/prod` → wait for rollout.
 
-### 5. First deploy / checking it worked
+### 3. First deploy / checking it worked
 
 ```bash
 kubectl get pods
@@ -149,21 +110,15 @@ curl -X POST http://<EXTERNAL-IP>/orders -H 'content-type: application/json' \
 
 ## Cost / teardown
 
-EKS control plane + 2x `t3.medium` + the LoadBalancer's ELB all bill continuously. When you're done:
+EKS control plane + 2x `t3.medium` + the NAT gateway + the LoadBalancer's ELB all bill continuously.
+When you're done:
 
 ```bash
-eksctl delete cluster -f eksctl/cluster.yaml
-
-for svc in order-service inventory-service notification-service; do
-  aws ecr delete-repository --repository-name "$svc" --region ap-south-1 --force
-done
-
-aws iam detach-role-policy \
-  --role-name github-actions-micro-service \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
-aws iam delete-role --role-name github-actions-micro-service
+cd terraform
+terraform destroy
 ```
 
-Leave the OIDC provider in place if other repos/roles in the account use it; otherwise delete it with
-`aws iam delete-open-id-connect-provider`.
+That tears down the cluster, VPC, ECR repos, and the GitHub OIDC role in one step. If other repos/roles in
+the account already relied on the GitHub OIDC *provider* before this, Terraform will have reused it rather
+than created it, and won't delete it on destroy.
 # micro-service-deployment
